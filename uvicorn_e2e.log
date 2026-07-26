@@ -1,0 +1,104 @@
+INFO:     Started server process [16092]
+INFO:     Waiting for application startup.
+2026-07-21 02:06:24,477 INFO app.main: === Digital Human AI Engine 启动 ===
+2026-07-21 02:06:24,485 INFO app.infrastructure.redis: Redis 连接池已初始化: localhost:6379/0, pool_size=10
+2026-07-21 02:06:24,512 INFO app.main: Redis 连接成功
+2026-07-21 02:06:24,858 INFO app.infrastructure.database: PostgreSQL 连接池已初始化: localhost:5432/digital_human
+2026-07-21 02:06:24,868 INFO app.main: PostgreSQL 连接成功
+2026-07-21 02:06:24,904 INFO app.mcp.registry: MCP 工具已注册: example_echo
+2026-07-21 02:06:24,905 INFO app.skill.loader: Skill 已加载: example (tools=['example_echo'])
+2026-07-21 02:06:24,910 INFO app.mcp.registry: MCP 工具已注册: hospital_navigate
+2026-07-21 02:06:24,911 INFO app.mcp.registry: MCP 工具已注册: hospital_print_report
+2026-07-21 02:06:24,911 INFO app.mcp.registry: MCP 工具已注册: hospital_call_reception
+2026-07-21 02:06:24,911 INFO app.skill.loader: Skill 已加载: hospital (tools=['hospital_navigate', 'hospital_print_report', 'hospital_call_reception'])
+2026-07-21 02:06:24,912 INFO app.main: Skills 已加载: ['example', 'hospital']
+2026-07-21 02:06:24,915 INFO app.mcp.registry: MCP 工具已注册: echo
+2026-07-21 02:06:24,915 INFO app.mcp.registry: MCP 工具已注册: avatar_action
+2026-07-21 02:06:24,915 INFO app.mcp.registry: MCP 工具已注册: current_time
+2026-07-21 02:06:24,916 INFO app.main: 内置 MCP 工具已注册
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:64408 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64411 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64420 - "WebSocket /ws" [accepted]
+INFO:     connection open
+2026-07-21 02:06:29,049 INFO app.main: 前端 WS 已连接: /ws
+2026-07-21 02:06:29,050 INFO app.ws.message_handler: 处理消息: type=session.create, requestId=None
+2026-07-21 02:06:29,055 INFO app.session.manager: 会话已创建(Redis): pytest-74318909
+2026-07-21 02:06:29,057 INFO app.ws.message_handler: 处理消息: type=chat.send, requestId=None
+2026-07-21 02:06:29,061 INFO app.ws.message_handler: Chat 请求: session_id=pytest-74318909, scene_id=hospital, device_id=pytest-device, text=ICU在哪里, skill_ids=[]
+2026-07-21 02:06:29,072 INFO app.workflow.interaction_graph: InteractionGraph 运行: session_id=pytest-74318909, skill_ids=['hospital'], scene=hospital, device=pytest-device, input='ICU在哪里'
+2026-07-21 02:06:29,084 INFO app.workflow.nodes: MCP 工具执行成功: hospital_navigate({'query': 'ICU在哪里'})
+2026-07-21 02:06:29,084 INFO app.workflow.nodes: 导航预路由命中: input=ICU在哪里, gesture=point_left
+2026-07-21 02:06:29,479 INFO httpx: HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-07-21 02:06:29,516 INFO app.rag.milvus_client: Milvus 客户端已连接: http://localhost:19530
+2026-07-21 02:06:29,527 [ERROR][_log_rpc_error]: RPC error: [has_collection], <MilvusException: (code=1100, message=Invalid collection name: faq_pytest-device. collection name can only contain numbers, letters and underscores: invalid parameter)>, <elapsed:6.6ms>
+Traceback:
+Traceback (most recent call last):
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\decorators.py", line 518, in handler
+    return func(*args, **kwargs)
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\decorators.py", line 565, in handler
+    return func(self, *args, **kwargs)
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\decorators.py", line 456, in handler
+    raise e from e
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\decorators.py", line 419, in handler
+    return func(*args, **kwargs)
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\client\grpc_handler.py", line 652, in has_collection
+    raise MilvusException(reply.status.code, reply.status.reason, reply.status.error_code)
+pymilvus.exceptions.MilvusException: <MilvusException: (code=1100, message=Invalid collection name: faq_pytest-device. collection name can only contain numbers, letters and underscores: invalid parameter)>
+ (decorators.py:472)
+2026-07-21 02:06:29,527 ERROR app.rag.retriever: FAQ 检索异常: collection=faq_pytest-device, error=<MilvusException: (code=1100, message=Invalid collection name: faq_pytest-device. collection name can only contain numbers, letters and underscores: invalid parameter)>
+2026-07-21 02:06:29,527 INFO app.rag.retriever: FAQ 检索完成: query=ICU在哪里, skill_ids=['pytest-device'], results=0
+2026-07-21 02:06:29,882 INFO httpx: HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-07-21 02:06:29,897 INFO app.rag.retriever: FAQ 检索完成: query=ICU在哪里, skill_ids=['hospital'], results=3
+2026-07-21 02:06:30,213 INFO httpx: HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank "HTTP/1.1 200 OK"
+2026-07-21 02:06:30,215 INFO app.rag.retriever: 场景级 FAQ 命中: scene=hospital, score=0.8752
+2026-07-21 02:06:30,530 INFO httpx: HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank "HTTP/1.1 200 OK"
+2026-07-21 02:06:30,536 INFO app.workflow.nodes: RAG 检索+重排: results=3, max_score=0.8752, route=faq_direct, source_type=faq, cross_ctx=no, nav_gesture=point_left
+2026-07-21 02:06:30,544 INFO app.workflow.nodes: 直接输出知识片段: session_id=pytest-74318909, score=0.8752, text=ICU综合监护位于9楼（重症监护）。
+2026-07-21 02:06:30,577 ERROR app.workflow.nodes: 跨设备上下文生成异常(direct): CrossContextManager.generate() got an unexpected keyword argument 'user_input'
+2026-07-21 02:06:30,580 INFO app.workflow.interaction_graph: InteractionGraph 完成: session_id=pytest-74318909, max_score=0.8752, reply_len=18
+INFO:     127.0.0.1:53900 - "WebSocket /ws?token=test-token" [accepted]
+INFO:     connection open
+2026-07-21 02:06:31,593 INFO app.main: 前端 WS 已连接: /ws
+INFO:     127.0.0.1:52079 - "GET /admin/avatar/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53252 - "GET /admin/avatar/list HTTP/1.1" 200 OK
+2026-07-21 02:06:50,591 INFO app.main: 前端 WS 已断开
+INFO:     127.0.0.1:65134 - "WebSocket /ws" [accepted]
+INFO:     connection open
+2026-07-21 02:06:50,603 INFO app.main: 前端 WS 已连接: /ws
+2026-07-21 02:06:50,604 INFO app.ws.message_handler: 处理消息: type=session.create, requestId=None
+2026-07-21 02:06:50,609 INFO app.session.manager: 会话已创建(Redis): pytest-e6469054
+2026-07-21 02:06:50,611 INFO app.ws.message_handler: 处理消息: type=chat.send, requestId=None
+2026-07-21 02:06:50,614 INFO app.ws.message_handler: Chat 请求: session_id=pytest-e6469054, scene_id=hospital, device_id=pytest-device, text=中医科在哪, skill_ids=[]
+2026-07-21 02:06:50,625 INFO app.workflow.interaction_graph: InteractionGraph 运行: session_id=pytest-e6469054, skill_ids=['hospital'], scene=hospital, device=pytest-device, input='中医科在哪'
+2026-07-21 02:06:50,626 INFO app.workflow.nodes: MCP 工具执行成功: hospital_navigate({'query': '中医科在哪'})
+2026-07-21 02:06:50,626 INFO app.workflow.nodes: 导航预路由命中: input=中医科在哪, gesture=point_right
+2026-07-21 02:06:50,987 INFO httpx: HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-07-21 02:06:50,996 [ERROR][_log_rpc_error]: RPC error: [has_collection], <MilvusException: (code=1100, message=Invalid collection name: faq_pytest-device. collection name can only contain numbers, letters and underscores: invalid parameter)>, <elapsed:5.5ms>
+Traceback:
+Traceback (most recent call last):
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\decorators.py", line 518, in handler
+    return func(*args, **kwargs)
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\decorators.py", line 565, in handler
+    return func(self, *args, **kwargs)
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\decorators.py", line 456, in handler
+    raise e from e
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\decorators.py", line 419, in handler
+    return func(*args, **kwargs)
+  File "C:\Users\lxz\Workspaces\digital-human-studio\python-ai-engine\.venv\Lib\site-packages\pymilvus\client\grpc_handler.py", line 652, in has_collection
+    raise MilvusException(reply.status.code, reply.status.reason, reply.status.error_code)
+pymilvus.exceptions.MilvusException: <MilvusException: (code=1100, message=Invalid collection name: faq_pytest-device. collection name can only contain numbers, letters and underscores: invalid parameter)>
+ (decorators.py:472)
+2026-07-21 02:06:50,997 ERROR app.rag.retriever: FAQ 检索异常: collection=faq_pytest-device, error=<MilvusException: (code=1100, message=Invalid collection name: faq_pytest-device. collection name can only contain numbers, letters and underscores: invalid parameter)>
+2026-07-21 02:06:50,997 INFO app.rag.retriever: FAQ 检索完成: query=中医科在哪, skill_ids=['pytest-device'], results=0
+2026-07-21 02:06:51,338 INFO httpx: HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-07-21 02:06:51,353 INFO app.rag.retriever: FAQ 检索完成: query=中医科在哪, skill_ids=['hospital'], results=3
+2026-07-21 02:06:51,693 INFO httpx: HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank "HTTP/1.1 200 OK"
+2026-07-21 02:06:51,695 INFO app.rag.retriever: 场景级 FAQ 命中: scene=hospital, score=0.9284
+2026-07-21 02:06:52,002 INFO httpx: HTTP Request: POST https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank "HTTP/1.1 200 OK"
+2026-07-21 02:06:52,006 INFO app.workflow.nodes: RAG 检索+重排: results=3, max_score=0.9284, route=faq_direct, source_type=faq, cross_ctx=no, nav_gesture=point_right
+2026-07-21 02:06:52,010 INFO app.workflow.nodes: 直接输出知识片段: session_id=pytest-e6469054, score=0.9284, text=中医科在6楼，包括针灸科、推拿理疗科、中药熏蒸室和治未病中心
+2026-07-21 02:06:52,039 ERROR app.workflow.nodes: 跨设备上下文生成异常(direct): CrossContextManager.generate() got an unexpected keyword argument 'user_input'
+2026-07-21 02:06:52,041 INFO app.workflow.interaction_graph: InteractionGraph 完成: session_id=pytest-e6469054, max_score=0.9284, reply_len=31
+2026-07-21 02:07:12,046 INFO app.main: 前端 WS 已断开

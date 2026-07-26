@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# 知识库重建备份（rebuild_hospital_kb.py 生成）
+backups/
+
+# KWS/ASR 模型文件（大体积，不入库）
+models/

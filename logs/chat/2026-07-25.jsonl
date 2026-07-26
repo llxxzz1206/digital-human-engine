@@ -1,0 +1,2 @@
+{"timestamp": "2026-07-25T00:24:56.400114", "session_id": "pytest-34480d9a", "user_input": "航空历史厅在哪", "reply": "航空历史厅在我们的2楼，沿着走廊直行就可以找到。", "route": "chat", "rerank_score": 0.0, "rag_hits": [], "latency_ms": 3502, "skill_ids": [], "asr_text": null}
+{"timestamp": "2026-07-25T00:25:22.359960", "session_id": "pytest-8b06409f", "user_input": "航天探索厅在哪", "reply": "航天探索厅在我们1楼大厅的尽头，顺着指示牌走就能找到。那里有各种航天器的模型和科普展览。", "route": "chat", "rerank_score": 0.0, "rag_hits": [], "latency_ms": 5121, "skill_ids": [], "asr_text": null}
