@@ -14,3 +14,13 @@ backups/
 
 # KWS/ASR 模型文件（大体积，不入库）
 models/
+
+# 运行时日志
+logs/
+*.log
+
+# 数字人素材包（大体积 / 私有资源）
+avatar-packages/
+
+# 项目数据目录（开发阶段资源）
+data/
