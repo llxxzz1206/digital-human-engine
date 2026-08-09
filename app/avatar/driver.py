@@ -50,7 +50,8 @@ class AvatarDriver:
 
         Args:
             state: 视频状态 (idle/talking/greeting/point_left/point_right/bow/自定义)
-            text:  回复文本（当前未使用，保留接口兼容）
+            text:  回复文本。当前仅做状态切换、未消费此参数；
+                   保留为后续口型同步/视频驱动预留，勿删（调用方均按位置传入）。
 
         Returns:
             {"state": "talking", "loop": true}

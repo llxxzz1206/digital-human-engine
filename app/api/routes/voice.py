@@ -41,7 +41,7 @@ async def warm_fixed_phrases() -> None:
 
 @router.get("/fixed-phrases")
 async def get_fixed_phrases():
-    """返回三句固定话术的 base64 PCM 音频（缓存未命中则现场合成并缓存）"""
+    """返回固定话术的 base64 PCM 音频（缓存未命中则现场合成并缓存）"""
     data = {}
     for key, text in FIXED_PHRASES.items():
         try:

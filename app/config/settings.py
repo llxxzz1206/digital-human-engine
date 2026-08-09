@@ -90,6 +90,12 @@ class SandboxConfig(BaseSettings):
     max_timeout: float = Field(default=120.0, description="工具最大超时（秒）")
 
 
+class RocketMQConfig(BaseSettings):
+    namesrv_addr: str = Field(default="localhost:9876", description="RocketMQ NameServer 地址")
+    topic: str = Field(default="knowledge-build-topic", description="知识库构建消息 Topic")
+    consumer_group: str = Field(default="knowledge-build-consumer", description="消费者组名")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -107,6 +113,7 @@ class Settings(BaseSettings):
     audio_enhance: AudioEnhanceConfig = AudioEnhanceConfig()
     database: DatabaseConfig = DatabaseConfig()
     sandbox: SandboxConfig = SandboxConfig()
+    rocketmq: RocketMQConfig = RocketMQConfig()
     log_level: str = Field(default="INFO", description="日志级别")
     
     # 安全配置

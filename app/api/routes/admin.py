@@ -1,16 +1,27 @@
 """管理后台 CRUD 接口 — 场景/设备(PostgreSQL) + 形象/Skill(Redis)"""
 from __future__ import annotations
 
+import io
+import json
 import logging
-import uuid
+import shutil
 import time
+import uuid
+import zipfile
+from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app.infrastructure.redis import RedisPool
-from app.infrastructure.database import DatabasePool
 from app.api.deps import verify_admin_token
+from app.config.settings import settings
+from app.infrastructure.database import DatabasePool
+from app.infrastructure.redis import RedisPool
+from app.services.system_config import system_config
+from app.services.visit_report import generate_visit_report, report_to_dict
+from app.skill.loader import skill_loader
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["管理后台"], dependencies=[Depends(verify_admin_token)])
@@ -181,14 +192,6 @@ async def device_delete(body: dict):
 # ══════════════════════════════════════
 # 形象管理 (Redis Hash + 本地视频文件)
 # ══════════════════════════════════════
-
-import json
-import shutil
-import zipfile
-from pathlib import Path
-
-from fastapi import UploadFile, File, Form
-from fastapi.responses import FileResponse, StreamingResponse
 
 AVATAR_PREFIX = "digitalhuman:avatar:"
 AVATAR_DIR = Path(__file__).parent.parent.parent.parent / "avatar-packages"
@@ -481,7 +484,6 @@ async def avatar_export(avatar_id: str):
     }
 
     # 打包 zip
-    import io
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("config.json", json.dumps(config, ensure_ascii=False, indent=2))
@@ -491,7 +493,6 @@ async def avatar_export(avatar_id: str):
     buf.seek(0)
 
     name = entries.get("name", avatar_id)
-    from urllib.parse import quote
     encoded_name = quote(f"{name}-avatar-package.zip")
     return StreamingResponse(
         buf,
@@ -565,7 +566,6 @@ async def skill_delete(body: dict):
         return {"code": 400, "data": None, "msg": "缺少 id"}
     await r.delete(SKILL_PREFIX + sid)
     # 联动卸载内存中的 Skill（代码定义或 Redis 加载的）
-    from app.skill.loader import skill_loader
     skill_loader.unload_skill(sid)
     return {"code": 200, "data": True}
 
@@ -634,7 +634,6 @@ async def timings_list(limit: int = Query(50, ge=1, le=200)):
         }
 
     # 当前管线"出处"配置（不含任何密钥），供前端展示各阶段用的模型/服务
-    from app.config.settings import settings
     asr_cfg = settings.asr
     asr_tag = (f"whisper·{asr_cfg.model}·{asr_cfg.device}"
                if asr_cfg.provider == "whisper" else asr_cfg.provider)
@@ -675,8 +674,6 @@ async def visit_report(session_id: str):
     Returns:
         报告JSON，包含 durationMinutes/conversationCount/topTopics/summary/tags/recommendations
     """
-    from app.services.visit_report import generate_visit_report, report_to_dict
-    
     report = await generate_visit_report(session_id)
     if report is None:
         return {"code": 404, "msg": "无对话记录", "data": None}
@@ -721,7 +718,6 @@ class ConfigBody(BaseModel):
 @router.get("/config/list")
 async def config_list():
     """获取所有系统配置"""
-    from app.services.system_config import system_config
     config = await system_config.get_config()
     return {"code": 200, "data": config}
 
@@ -729,7 +725,6 @@ async def config_list():
 @router.get("/config/{category}")
 async def config_get(category: str):
     """获取指定类型的配置"""
-    from app.services.system_config import system_config
     config = await system_config.get_config(category)
     return {"code": 200, "data": config}
 
@@ -737,7 +732,6 @@ async def config_get(category: str):
 @router.post("/config/update")
 async def config_update(body: ConfigBody):
     """更新配置（支持热更新）"""
-    from app.services.system_config import system_config
     success, message = await system_config.update_config(body.category, body.config)
     if success:
         return {"code": 200, "data": {"message": message}}
@@ -748,7 +742,6 @@ async def config_update(body: ConfigBody):
 @router.post("/config/reset/{category}")
 async def config_reset(category: str):
     """重置配置为默认值"""
-    from app.services.system_config import system_config
     success = await system_config.reset_config(category)
     if success:
         return {"code": 200, "data": {"message": "配置已重置"}}
@@ -759,7 +752,6 @@ async def config_reset(category: str):
 @router.get("/config/history/{category}")
 async def config_history(category: str, limit: int = Query(default=10)):
     """获取配置变更历史"""
-    from app.services.system_config import system_config
     history = await system_config.get_change_history(category, limit)
     return {"code": 200, "data": history}
 
@@ -767,7 +759,6 @@ async def config_history(category: str, limit: int = Query(default=10)):
 @router.post("/config/test-llm")
 async def config_test_llm(body: LLMConfigBody):
     """测试 LLM 连接"""
-    from app.services.system_config import system_config
     success, message = await system_config.test_llm_connection(
         body.provider, body.model, body.api_key, body.api_base
     )

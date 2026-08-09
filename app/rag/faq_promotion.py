@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from datetime import datetime
 
@@ -75,7 +76,7 @@ class FAQPromotionService:
             return
 
         question_hash = hashlib.sha256(question.encode("utf-8")).hexdigest()
-        source_json = __import__("json").dumps(source_chunks or [], ensure_ascii=False)
+        source_json = json.dumps(source_chunks or [], ensure_ascii=False)
 
         for skill_id in skill_ids or []:
             try:
@@ -226,16 +227,14 @@ class FAQPromotionService:
         if row["status"] == "promoted":
             return {"status": "already_promoted", "id": candidate_id}
 
-        await self._promote(candidate_id, row["skill_id"], row["question_text"], row["answer_text"])
+        try:
+            await self._promote(candidate_id, row["skill_id"], row["question_text"], row["answer_text"])
+        except Exception as e:
+            logger.error("FAQ 人工确认晋升失败: candidate_id=%d, error=%s", candidate_id, e)
+            return {"status": "promote_failed", "id": candidate_id, "error": str(e)}
 
-        # _promote 内部捕获异常，需复核状态确认是否真的写入成功
-        after = await DatabasePool.fetchrow(
-            "SELECT status FROM faq_candidate WHERE id = $1", candidate_id
-        )
-        if after and after["status"] == "promoted":
-            logger.info("FAQ 人工确认通过: candidate_id=%d, skill_id=%s", candidate_id, row["skill_id"])
-            return {"status": "promoted", "id": candidate_id}
-        return {"status": "promote_failed", "id": candidate_id}
+        logger.info("FAQ 人工确认通过: candidate_id=%d, skill_id=%s", candidate_id, row["skill_id"])
+        return {"status": "promoted", "id": candidate_id}
 
     async def reject(self, candidate_id: int, reason: str = "") -> dict:
         """人工驳回：pending/candidate → demoted（从未写入 Milvus，无需删除向量）"""
@@ -255,43 +254,42 @@ class FAQPromotionService:
         return {"status": "rejected", "id": candidate_id}
 
     async def _promote(self, candidate_id: int, skill_id: str, question: str, answer: str) -> None:
-        """将候选晋升为 FAQ，写入 Milvus faq_* 集合"""
-        try:
-            # 1. 向量化问题
-            vector = await embedding_service.embed(question)
+        """将候选晋升为 FAQ，写入 Milvus faq_* 集合
 
-            # 2. 确保 faq_* 集合存在
-            collection_name = f"faq_{skill_id}"
-            milvus_manager.ensure_collection(collection_name)
+        异常会向上传播，由调用方决定如何处理（approve/manual_promote）。
+        """
+        # 1. 向量化问题
+        vector = await embedding_service.embed(question)
 
-            # 3. 写入 Milvus
-            client = milvus_manager.get_client()
-            client.insert(
-                collection_name=collection_name,
-                data=[{
-                    "vector": vector,
-                    "text": answer,
-                    "metadata": {
-                        "question": question,
-                        "skill_id": skill_id,
-                        "source_candidate_id": candidate_id,
-                        "promoted_at": datetime.now().isoformat(),
-                    },
-                }],
-            )
+        # 2. 确保 faq_* 集合存在
+        collection_name = f"faq_{skill_id}"
+        milvus_manager.ensure_collection(collection_name)
 
-            # 4. 更新 PG 状态
-            await DatabasePool.execute(
-                "UPDATE faq_candidate SET status = 'promoted', promoted_at = NOW(), "
-                "updated_at = NOW() WHERE id = $1",
-                candidate_id,
-            )
+        # 3. 写入 Milvus
+        client = milvus_manager.get_client()
+        client.insert(
+            collection_name=collection_name,
+            data=[{
+                "vector": vector,
+                "text": answer,
+                "metadata": {
+                    "question": question,
+                    "skill_id": skill_id,
+                    "source_candidate_id": candidate_id,
+                    "promoted_at": datetime.now().isoformat(),
+                },
+            }],
+        )
 
-            logger.info("FAQ 晋升成功: skill_id=%s, question=%s, candidate_id=%d",
-                        skill_id, question[:30], candidate_id)
+        # 4. 更新 PG 状态
+        await DatabasePool.execute(
+            "UPDATE faq_candidate SET status = 'promoted', promoted_at = NOW(), "
+            "updated_at = NOW() WHERE id = $1",
+            candidate_id,
+        )
 
-        except Exception as e:
-            logger.error("FAQ 晋升失败: candidate_id=%d, error=%s", candidate_id, e)
+        logger.info("FAQ 晋升成功: skill_id=%s, question=%s, candidate_id=%d",
+                    skill_id, question[:30], candidate_id)
 
     async def manual_promote(self, skill_id: str, question: str, answer: str) -> dict:
         """手动晋升：直接创建 FAQ 条目（跳过 hit_count 判断）"""
@@ -317,17 +315,13 @@ class FAQPromotionService:
             await self._promote(existing["id"], skill_id, question, answer)
             return {"status": "promoted", "id": existing["id"]}
 
-        # 新建并直接晋升
-        await DatabasePool.execute(
+        # 新建并直接晋升（使用 RETURNING 避免 INSERT+SELECT 竞态）
+        row = await DatabasePool.fetchrow(
             """INSERT INTO faq_candidate
                (skill_id, question_hash, question_text, answer_text, source_chunks, hit_count, status)
-               VALUES ($1, $2, $3, $4, '[]'::jsonb, 0, 'candidate')""",
+               VALUES ($1, $2, $3, $4, '[]'::jsonb, 0, 'candidate')
+               RETURNING id""",
             skill_id, question_hash, question, answer,
-        )
-
-        row = await DatabasePool.fetchrow(
-            "SELECT id FROM faq_candidate WHERE skill_id = $1 AND question_hash = $2",
-            skill_id, question_hash,
         )
 
         await self._promote(row["id"], skill_id, question, answer)
