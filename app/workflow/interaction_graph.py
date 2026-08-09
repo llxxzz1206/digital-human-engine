@@ -6,20 +6,23 @@ import logging
 import time
 from typing import Awaitable, Callable
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from app.workflow.state import WorkflowState
+from app.config.settings import settings
+from app.infrastructure.redis import RedisPool
+from app.services.latency_alerter import latency_alerter
 from app.session.manager import session_manager
 from app.workflow.nodes import (
-    rag_retriever_node,
-    direct_answer_node,
-    noise_response_node,
-    reply_generator,
     avatar_driver_node,
+    direct_answer_node,
     faq_candidate_recorder_node,
+    noise_response_node,
+    rag_retriever_node,
+    reply_generator,
     route_by_score,
     set_send_func,
 )
+from app.workflow.state import WorkflowState
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +81,6 @@ async def _record_timing(session_id: str, route: str, timings: dict, wf_ms: int)
     只记数、不阻塞主流程：任何异常都吞掉，绝不影响对话。
     """
     try:
-        from app.infrastructure.redis import RedisPool
-        from app.config.settings import settings
-
         rag = timings.get("rag") or {}
         llm = timings.get("llm") or {}
         tts = timings.get("tts") or {}
@@ -277,7 +277,6 @@ class InteractionGraph:
         avatar_id = getattr(session, "avatarId", "") or getattr(session, "avatar_id", "")
         if avatar_id:
             try:
-                from app.infrastructure.redis import RedisPool
                 r = await RedisPool.get()
                 raw = await r.hgetall(f"digitalhuman:avatar:{avatar_id}")
                 if raw:
@@ -334,7 +333,6 @@ class InteractionGraph:
             await _record_timing(session_id, route, timings, wf_ms)
             
             # 延迟告警检查
-            from app.services.latency_alerter import latency_alerter
             alert_result = await latency_alerter.check(session_id, timings, route)
             if alert_result.get("alerts"):
                 logger.warning("延迟告警: session=%s, alerts=%d", session_id, alert_result["alert_count"])
@@ -358,8 +356,6 @@ class InteractionGraph:
 
     async def interrupt(self, session_id: str) -> None:
         """中断正在运行的工作流"""
-        from app.infrastructure.redis import RedisPool
-
         try:
             redis = await RedisPool.get()
             key = f"digitalhuman:interrupt:{session_id}"

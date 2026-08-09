@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import base64
@@ -27,14 +27,15 @@ class TTSService:
 
     def _build_auth_url(self) -> str:
         """生成讯飞 TTS WebSocket 鉴权 URL（遵循官方 demo 格式）"""
-        url = "wss://tts-api.xfyun.cn/v2/tts"
+        url = settings.tts.api_url
+        api_host = settings.tts.api_host
 
         # RFC1123 格式时间戳
         now = datetime.now()
         date = format_date_time(mktime(now.timetuple()))
 
         # 拼接签名字符串（注意 GET 后面的空格和 /v2/tts 后面的空格）
-        signature_origin = "host: ws-api.xfyun.cn\n"
+        signature_origin = f"host: {api_host}\n"
         signature_origin += "date: " + date + "\n"
         signature_origin += "GET /v2/tts HTTP/1.1"
 
@@ -55,7 +56,7 @@ class TTSService:
         v = {
             "authorization": authorization,
             "date": date,
-            "host": "ws-api.xfyun.cn",
+            "host": api_host,
         }
         return url + "?" + urlencode(v)
 

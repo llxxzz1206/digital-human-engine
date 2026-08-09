@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -20,6 +21,7 @@ class SessionManager:
     def __init__(self) -> None:
         # 内存回退（Redis 不可用时使用）
         self._fallback: dict[str, dict[str, Any]] = {}
+        self._fallback_lock = asyncio.Lock()
 
     async def _get_redis(self):
         """获取 Redis 客户端，不可用则返回 None"""
@@ -84,7 +86,8 @@ class SessionManager:
             await redis.set(key, data, ex=settings.redis.session_ttl)
             logger.info("会话已创建(Redis): %s", session_id)
         else:
-            self._fallback[session_id] = session.model_dump()
+            async with self._fallback_lock:
+                self._fallback[session_id] = session.model_dump()
             logger.info("会话已创建(内存回退): %s", session_id)
 
         return session
@@ -100,7 +103,8 @@ class SessionManager:
                 return None
             return Session.model_validate_json(data)
         else:
-            raw = self._fallback.get(session_id)
+            async with self._fallback_lock:
+                raw = self._fallback.get(session_id)
             if raw is None:
                 return None
             return Session.model_validate(raw)
@@ -114,7 +118,8 @@ class SessionManager:
             await redis.delete(key)
             logger.info("会话已销毁(Redis): %s", session_id)
         else:
-            self._fallback.pop(session_id, None)
+            async with self._fallback_lock:
+                self._fallback.pop(session_id, None)
             logger.info("会话已销毁(内存回退): %s", session_id)
 
     async def mount_skill(self, session_id: str, skill_id: str) -> None:
@@ -126,7 +131,7 @@ class SessionManager:
         if skill_id not in session.mountedSkills:
             session.mountedSkills.append(skill_id)
             session.updatedAt = int(time.time() * 1000)
-            await self._save_session(session)
+            await self.save_session(session)
             logger.info("Skill 已挂载: session=%s, skill=%s", session_id, skill_id)
 
     async def unmount_skill(self, session_id: str, skill_id: str) -> None:
@@ -138,7 +143,7 @@ class SessionManager:
         if skill_id in session.mountedSkills:
             session.mountedSkills.remove(skill_id)
             session.updatedAt = int(time.time() * 1000)
-            await self._save_session(session)
+            await self.save_session(session)
             logger.info("Skill 已卸载: session=%s, skill=%s", session_id, skill_id)
 
     async def refresh_ttl(self, session_id: str) -> None:
@@ -149,7 +154,7 @@ class SessionManager:
         if redis is not None:
             await redis.expire(key, settings.redis.session_ttl)
 
-    async def _save_session(self, session: Session) -> None:
+    async def save_session(self, session: Session) -> None:
         """保存会话到存储"""
         key = f"{_KEY_PREFIX}{session.sessionId}"
         data = session.model_dump_json()
@@ -158,7 +163,8 @@ class SessionManager:
         if redis is not None:
             await redis.set(key, data, ex=settings.redis.session_ttl)
         else:
-            self._fallback[session.sessionId] = session.model_dump()
+            async with self._fallback_lock:
+                self._fallback[session.sessionId] = session.model_dump()
 
 
 session_manager = SessionManager()

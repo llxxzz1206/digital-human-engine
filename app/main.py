@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,6 +20,9 @@ from app.ws.message_handler import handle_message
 from app.skill.loader import skill_loader
 
 logger = logging.getLogger(__name__)
+
+# WS 连接频率限制：ip -> [timestamp, ...]
+_ws_conn_log: dict[str, list[float]] = {}
 
 
 @asynccontextmanager
@@ -138,19 +142,15 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = None):
 
     # 连接频率限制（同 IP 10次/分钟）
     client_ip = websocket.client.host if websocket.client else "unknown"
-    import time as _time
-    now = _time.time()
-    if not hasattr(websocket_endpoint, "_conn_log"):
-        websocket_endpoint._conn_log = {}  # type: ignore
-    conn_log: dict = websocket_endpoint._conn_log  # type: ignore
-    timestamps = conn_log.get(client_ip, [])
+    now = time.time()
+    timestamps = _ws_conn_log.get(client_ip, [])
     timestamps = [t for t in timestamps if now - t < 60]
     if len(timestamps) >= 10:
         await websocket.close(code=4002, reason="Rate limit exceeded")
         logger.warning("WebSocket 连接被拒绝：频率超限 ip=%s", client_ip)
         return
     timestamps.append(now)
-    conn_log[client_ip] = timestamps
+    _ws_conn_log[client_ip] = timestamps
 
     await websocket.accept()
     logger.info("前端 WS 已连接: %s", websocket.url.path)

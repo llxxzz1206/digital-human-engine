@@ -98,7 +98,7 @@ class UserManager:
                 # 更新设备绑定
                 session.deviceId = device_id
                 session.updatedAt = int(time.time() * 1000)
-                await session_manager._save_session(session)
+                await session_manager.save_session(session)
                 logger.info("用户会话恢复: user=%s, session=%s, device=%s", user_id, active_session_id, device_id)
                 return session, False
 

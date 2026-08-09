@@ -1,27 +1,32 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import base64
 import logging
 import time
+import uuid
 from typing import AsyncGenerator
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 
+from app.config.settings import settings
 from app.mcp.registry import tool_registry
 from app.mcp.sandbox import sandbox_executor
-from app.workflow.interaction_graph import interaction_graph
-from app.session.manager import session_manager
-from app.session.history import conversation_history
-from app.voice.tts_service import tts_service
-from app.voice.asr_service import asr_service
-from app.voice.xunfei_asr import xunfei_asr_manager, XunfeiAsrSession
-from app.voice.wake_match import match_wake
-from app.voice.kws_service import kws_service
-from app.voice.noise_filter import compute_rms, is_hallucination, NOISE_REPLY_TEXT
-from app.voice.audio_enhancer import get_audio_enhancer, EnhancementConfig
+from app.rag.search_cache import search_cache
+from app.services.user_manager import user_manager
 from app.session.breakpoint import breakpoint_manager
-from app.config.settings import settings
+from app.session.history import conversation_history
+from app.session.manager import session_manager
+from app.skill.loader import skill_loader
+from app.voice.asr_service import asr_service
+from app.voice.audio_enhancer import EnhancementConfig, get_audio_enhancer
+from app.voice.kws_service import kws_service
+from app.voice.noise_filter import NOISE_REPLY_TEXT, compute_rms, is_hallucination
+from app.voice.tts_service import tts_service
+from app.voice.wake_match import match_wake
+from app.voice.xunfei_asr import XunfeiAsrSession, xunfei_asr_manager
+from app.workflow.interaction_graph import interaction_graph
+from app.workflow.nodes import clear_session_driver, get_session_driver
 
 logger = logging.getLogger(__name__)
 
@@ -73,15 +78,13 @@ async def _send(websocket: WebSocket, message: dict) -> None:
     """通过 WS 连接发送消息（断连时静默丢弃）"""
     try:
         await websocket.send_json(message)
-    except Exception:
-        # WS 已断连，静默丢弃消息（避免后台 task 崩溃）
+    except (WebSocketDisconnect, ConnectionError, OSError, RuntimeError):
+        # WS 已断连或状态异常，静默丢弃消息（避免后台 task 崩溃）
         pass
 
 
 async def _handle_session_create(payload: dict, websocket: WebSocket) -> None:
     """处理会话创建请求（支持固定终端和移动端）"""
-    import uuid
-
     session_id = payload.get("sessionId") or str(uuid.uuid4())
     user_id = payload.get("userId", "")
     avatar_id = payload.get("avatarId", "")
@@ -108,7 +111,6 @@ async def _handle_session_create(payload: dict, websocket: WebSocket) -> None:
     user_type = payload.get("userType", "general")
 
     # ── 用户认证（移动端必填）──
-    from app.services.user_manager import user_manager
     if platform in ("mobile_app", "mini_app"):
         if not user_id:
             await websocket.send_json({
@@ -126,8 +128,7 @@ async def _handle_session_create(payload: dict, websocket: WebSocket) -> None:
     # ── 场景探测（移动端自动探测）──
     detected_scene = None
     if platform in ("mobile_app", "mini_app") and latitude and longitude:
-        from app.services.scene_detector import scene_detector
-        from app.services.scene_detector import GeoLocation
+        from app.services.scene_detector import GeoLocation, scene_detector
 
         geo_loc = GeoLocation(latitude=float(latitude), longitude=float(longitude))
         detected_scene = await scene_detector.detect(geo_loc, user_id)
@@ -156,7 +157,7 @@ async def _handle_session_create(payload: dict, websocket: WebSocket) -> None:
         if detected_scene and session.sceneId != detected_scene:
             session.sceneId = detected_scene
             session.updatedAt = int(time.time() * 1000)
-            await session_manager._save_session(session)
+            await session_manager.save_session(session)
 
         # 更新用户偏好
         if detected_scene:
@@ -179,7 +180,6 @@ async def _handle_session_create(payload: dict, websocket: WebSocket) -> None:
 
     # 自动挂载 sceneId 对应的 Skill（如果有）
     if scene_id:
-        from app.skill.loader import skill_loader
         skill = skill_loader.get_skill(scene_id)
         if skill:
             await session_manager.mount_skill(session_id, scene_id)
@@ -212,8 +212,9 @@ async def _handle_session_destroy(payload: dict, websocket: WebSocket) -> None:
     await conversation_history.clear(session_id)
     # 清理各模块的 session 级缓存
     interaction_graph.cleanup_session(session_id)
-    from app.rag.search_cache import search_cache
     search_cache.clear_session(session_id)
+    # 清理 Avatar driver 和 gesture 缓存
+    clear_session_driver(session_id)
     # 清理音频缓冲区
     _audio_buffers.pop(session_id, None)
     _asr_rms_buffers.pop(session_id, None)
@@ -276,8 +277,6 @@ async def _handle_chat_send(payload: dict, websocket: WebSocket) -> None:
     使用 asyncio.create_task 启动 workflow，不阻塞 WS 消息循环，
     以便 interrupt 等消息可以及时处理。
     """
-    import time as _time
-
     session_id = payload.get("sessionId", "")
     user_id = payload.get("userId", "")
     channel_id = payload.get("channelId", "")
@@ -287,7 +286,7 @@ async def _handle_chat_send(payload: dict, websocket: WebSocket) -> None:
 
     # 去重：同一 session 相同文本 3 秒内只处理一次
     dedup_key = f"{session_id}:{text}"
-    now = _time.time()
+    now = time.time()
     if dedup_key in _recent_messages and (now - _recent_messages[dedup_key]) < _DEDUP_WINDOW:
         logger.warning("重复消息已忽略: session_id=%s, text=%s", session_id, text[:30])
         return
@@ -319,7 +318,6 @@ async def _handle_chat_send(payload: dict, websocket: WebSocket) -> None:
     await conversation_history.append(session_id, "user", text)
 
     # 获取 Skill 提供的工具定义
-    from app.skill.loader import skill_loader
     # 前端通常只发 sceneId 不带 skillIds：scene_id 与 skill 同名，
     # 为空时从场景解析技能，保证导诊等工具可用（否则导航手势无法触发）
     if not skill_ids and scene_id and skill_loader.get_skill(scene_id):
@@ -457,7 +455,6 @@ async def _handle_greeting_trigger(payload: dict, websocket: WebSocket) -> None:
 
         try:
             # 2. TTS 合成问候语音
-            from app.voice.tts_service import tts_service
             audio_chunks = []
             async for chunk in tts_service.synthesize_stream(greeting_text):
                 audio_chunks.append(chunk)
@@ -488,7 +485,6 @@ async def _handle_greeting_trigger(payload: dict, websocket: WebSocket) -> None:
 
         try:
             # 3. 驱动数字人播放问候视频
-            from app.workflow.nodes import get_session_driver
             driver = get_session_driver(session_id)
             drive_data = await driver.generate_drive("greeting", greeting_text)
             await _send_with_context({
@@ -965,6 +961,7 @@ async def cleanup_connection_sessions(session_ids: set[str]) -> None:
     for sid in session_ids:
         _audio_buffers.pop(sid, None)
         _asr_rms_buffers.pop(sid, None)
+        clear_session_driver(sid)
         try:
             await xunfei_asr_manager.remove(sid)
         except Exception:

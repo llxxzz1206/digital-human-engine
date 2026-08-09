@@ -1,27 +1,43 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-import json
 import asyncio
 import base64
+import contextvars
+import json
 import logging
 import time
-import contextvars
-from typing import Any, Awaitable, Callable
+from functools import partial
+from typing import Any, Callable
 
-from app.llm.service import llm_service, StreamEvent
-from app.rag.retriever import dual_retriever
-from app.rag.reranker import reranker
-from app.rag.tts_cache import tts_cache
-from app.rag.search_cache import search_cache
+from app.avatar.driver import AvatarDriver, avatar_driver
+from app.config.settings import settings
+from app.infrastructure.redis import RedisPool
+from app.llm.service import StreamEvent, llm_service
 from app.mcp.registry import tool_registry
 from app.mcp.sandbox import sandbox_executor
-from app.avatar.driver import AvatarDriver, avatar_driver
-from app.voice.tts_service import tts_service
+from app.rag.reranker import reranker
+from app.rag.search_cache import search_cache
+from app.rag.tts_cache import tts_cache
 from app.services.chat_logger import chat_logger
+from app.session.breakpoint import breakpoint_manager
+from app.session.cross_context import cross_context
+from app.session.history import conversation_history
+from app.session.style import get_style_prompt
+from app.skill.context import SkillContext
+from app.skill.loader import skill_loader
+from app.voice.tts_service import tts_service
 from app.workflow.state import WorkflowState
-from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# 16kHz 16bit mono PCM 每秒字节数
+PCM_BYTES_PER_SECOND = 16000 * 16 // 8 * 1
+
+# 中断检查间隔（每 N 个 token 检查一次 Redis 中断标志）
+INTERRUPT_CHECK_INTERVAL = 5
+
+# RAG 上下文注入 top N 片段
+RAG_TOP_CONTEXT = 2
 
 # 使用 ContextVar 替代全局变量，确保并发 session 各自独立
 _current_send_func: contextvars.ContextVar[Callable[[dict], Awaitable[None]] | None] = contextvars.ContextVar(
@@ -45,8 +61,9 @@ def get_session_driver(session_id: str, avatar_config: dict | None = None) -> Av
 
 
 def clear_session_driver(session_id: str) -> None:
-    """session 结束时清理"""
+    """session 结束时清理 driver 和 gesture 缓存"""
     _session_drivers.pop(session_id, None)
+    _last_gesture.pop(session_id, None)
 
 # 句子结束符
 _SENTENCE_ENDS = set("。？！；\n!?;")
@@ -158,7 +175,6 @@ def _is_sentence_end(text: str) -> bool:
 async def _check_interrupted(session_id: str) -> bool:
     """检查 session 是否被中断"""
     try:
-        from app.infrastructure.redis import RedisPool
         redis = await RedisPool.get()
         key = f"digitalhuman:interrupt:{session_id}"
         val = await redis.get(key)
@@ -218,7 +234,6 @@ async def _background_summarize(session_id: str, old_messages: list[dict]) -> No
     try:
         summary = await _summarize_history(old_messages)
         if summary:
-            from app.session.history import conversation_history
             await conversation_history.set_summary(session_id, summary, len(old_messages))
             logger.debug("后台摘要已缓存: session=%s, len=%d", session_id, len(summary))
     except Exception as e:
@@ -344,7 +359,6 @@ async def _load_cross_device_context(scene_id: str, device_id: str) -> str:
     if not scene_id or not device_id:
         return ""
     try:
-        from app.session.cross_context import cross_context
         ctx = await cross_context.get(scene_id, device_id)
         if ctx:
             return cross_context.format_prompt(ctx)
@@ -368,7 +382,6 @@ def route_by_score(state: WorkflowState) -> str:
         return "chat"
 
     # L2 噪音判定：rerank 最高分低于阈值 → 不送 LLM
-    from app.config.settings import settings
     if max_score < settings.rag.rerank_noise_threshold:
         logger.info("L2 噪音判定: max_score=%.4f < %.4f → noise", max_score, settings.rag.rerank_noise_threshold)
         return "noise"
@@ -469,7 +482,6 @@ async def direct_answer_node(state: WorkflowState) -> dict:
     device_location = state.get("device_location", "")
     if scene_id and device_id and reply:
         try:
-            from app.session.cross_context import cross_context
             await cross_context.generate(
                 scene_id=scene_id,
                 device_id=device_id,
@@ -561,7 +573,6 @@ async def tool_executor_node(state: WorkflowState) -> dict:
         tool_calls = _infer_tool_calls(user_input, available_tools)
 
     # 构建工具上下文
-    from app.skill.context import SkillContext
     _ctx = SkillContext(
         session_id=state.get("session_id", ""),
         platform=state.get("platform", "fixed_terminal"),
@@ -649,7 +660,6 @@ async def reply_generator(state: WorkflowState) -> dict:
     max_rerank_score = state.get("max_rerank_score", 0.0)
 
     # ── 检查断点续讲 ──
-    from app.session.breakpoint import breakpoint_manager
     breakpoint = breakpoint_manager.consume(session_id)
     resume_prompt = ""
     if breakpoint:
@@ -659,7 +669,6 @@ async def reply_generator(state: WorkflowState) -> dict:
             logger.info("启用断点续讲: session_id=%s, remaining=%d字符", session_id, len(remaining_text))
 
     # ── 个性化讲解风格 ──
-    from app.session.style import get_style_prompt
     user_type = state.get("user_type", "general")
     style_prompt = get_style_prompt(user_type)
 
@@ -691,7 +700,6 @@ async def reply_generator(state: WorkflowState) -> dict:
         )
 
     if skill_ids:
-        from app.skill.loader import skill_loader
         for skill_id in skill_ids:
             skill = skill_loader.get_skill(skill_id)
             if skill and skill.system_prompt:
@@ -701,7 +709,7 @@ async def reply_generator(state: WorkflowState) -> dict:
     route = state.get("route", "chat")
     if route == "rag_chat" and context:
         # 只取 top 2 片段注入
-        top_context = sorted(context, key=lambda x: x.get("rerank_score", 0.0), reverse=True)[:2]
+        top_context = sorted(context, key=lambda x: x.get("rerank_score", 0.0), reverse=True)[:RAG_TOP_CONTEXT]
         context_text = "\n".join([f"- {c.get('text', '')}" for c in top_context])
         system_prompt += f"\n\n参考知识：\n{context_text}"
 
@@ -719,7 +727,6 @@ async def reply_generator(state: WorkflowState) -> dict:
         system_prompt += cross_device_context
 
     # 构造消息列表（可配置上下文窗口，超出部分摘要压缩）
-    from app.config.settings import settings
     context_window = settings.rag.context_window  # 默认 20 条 = 10 轮
 
     if len(messages) > context_window:
@@ -728,7 +735,6 @@ async def reply_generator(state: WorkflowState) -> dict:
         recent_messages = messages[-context_window:]
 
         # 优先使用缓存摘要（避免阻塞回复路径 1-3s）
-        from app.session.history import conversation_history
         cached_summary, cached_count = await conversation_history.get_summary(session_id)
 
         if cached_summary and cached_count >= len(old_messages):
@@ -772,8 +778,6 @@ async def reply_generator(state: WorkflowState) -> dict:
     tts_cache_hits = 0
 
     # 绑定 session_id + 上下文到 tool executor（用于捕获 gesture + 工具上下文）
-    from functools import partial
-    from app.skill.context import SkillContext
     _tool_context = SkillContext(
         session_id=session_id,
         platform=state.get("platform", "fixed_terminal"),
@@ -785,8 +789,7 @@ async def reply_generator(state: WorkflowState) -> dict:
 
     # 难度路由：rag_chat 答案简短且基于注入知识，用快模型大幅压低首字延迟；
     # 普通/复杂对话保留默认（更强）模型。fast_model 为空则不路由。
-    from app.config.settings import settings as _settings
-    _fast_model = _settings.llm.fast_model
+    _fast_model = settings.llm.fast_model
     _use_model = _fast_model if (route == "rag_chat" and _fast_model) else None
     if _use_model:
         logger.info("LLM 难度路由: route=%s → fast_model=%s", route, _use_model)
@@ -800,7 +803,7 @@ async def reply_generator(state: WorkflowState) -> dict:
     async for event in stream_source:
         # 每 5 个 token 检查一次中断标志（降低 Redis 调用频率）
         _token_count += 1
-        if _token_count % 5 == 0 and await _check_interrupted(session_id):
+        if _token_count % INTERRUPT_CHECK_INTERVAL == 0 and await _check_interrupted(session_id):
             logger.info("LLM 流式生成被中断: session_id=%s", session_id)
             break
 
@@ -890,7 +893,6 @@ async def reply_generator(state: WorkflowState) -> dict:
     device_location = state.get("device_location", "")
     if scene_id and device_id and full_reply:
         try:
-            from app.session.cross_context import cross_context
             await cross_context.generate(
                 scene_id=scene_id,
                 device_id=device_id,
@@ -973,9 +975,8 @@ async def _stream_tts_sentence(text: str, session_id: str, start_index: int) -> 
 
     # 3. 异步写入缓存（不阻塞主流程）
     if audio_chunks:
-        import asyncio
         full_audio = b"".join(audio_chunks)
-        duration_ms = int(len(full_audio) / 32000 * 1000)
+        duration_ms = int(len(full_audio) / PCM_BYTES_PER_SECOND * 1000)
 
         async def _cache_put():
             try:

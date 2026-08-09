@@ -34,6 +34,8 @@ class TTSConfig(BaseSettings):
     api_secret: str = Field(default="", description="讯飞 TTS API_SECRET")
     voice: str = Field(default="x4_lingxiaoxuan_oral", description="讯飞发音人")
     speed: int = Field(default=50, description="语速 (0-100)")
+    api_url: str = Field(default="wss://tts-api.xfyun.cn/v2/tts", description="讯飞 TTS WebSocket URL")
+    api_host: str = Field(default="ws-api.xfyun.cn", description="讯飞 TTS 鉴权 host")
 
 
 class RedisConfig(BaseSettings):

@@ -5,8 +5,12 @@ import logging
 
 from app.config.settings import settings
 from app.infrastructure.database import DatabasePool
+from app.voice.tts_service import tts_service
 
 logger = logging.getLogger(__name__)
+
+# 16kHz 16bit mono PCM 每秒字节数
+PCM_BYTES_PER_SECOND = 16000 * 16 // 8 * 1
 
 
 class TTSCacheService:
@@ -106,7 +110,6 @@ class TTSCacheService:
             return cached
 
         # 2. 调用 TTS 合成
-        from app.voice.tts_service import tts_service
         audio_chunks: list[bytes] = []
         async for chunk in tts_service.synthesize_stream(text):
             if chunk:
@@ -117,7 +120,7 @@ class TTSCacheService:
         # 3. 存入缓存
         if audio_data:
             # 估算时长：16kHz 16bit mono → 每秒 32000 字节
-            duration_ms = int(len(audio_data) / 32000 * 1000)
+            duration_ms = int(len(audio_data) / PCM_BYTES_PER_SECOND * 1000)
             await self.put(text, audio_data, speaker, duration_ms)
 
         return audio_data

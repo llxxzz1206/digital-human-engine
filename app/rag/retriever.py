@@ -216,7 +216,6 @@ class DualCollectionRetriever:
         scene_id: str,
         device_id: str,
         platform: str = "fixed_terminal",
-        current_location: str = "",
     ) -> tuple[list[dict], str]:
         """分层检索：设备级 → 场景级（支持移动端）
 
